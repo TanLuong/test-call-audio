@@ -201,7 +201,7 @@
       window.location.href = 'call.html';
     }
 
-    // ── Join room (joiner) ────────────────────────────────
+    // ── Join room (joiner) ────────────────────────────────────────────────────
     function joinRoom() {
       const input = document.getElementById('join-code-input');
       const code  = input.value.trim().toUpperCase();
@@ -215,8 +215,8 @@
       btn.classList.add('loading');
       btn.disabled = true;
 
-      // Verify room exists via signaling
-      socket.emit('join-room', { roomCode: code }, (res) => {
+      // Only validate — actual join happens in call.html (new socket)
+      socket.emit('check-room', { roomCode: code }, (res) => {
         btn.classList.remove('loading');
         btn.disabled = false;
 
@@ -225,10 +225,9 @@
           return;
         }
 
-        // Room verified — go to call page
+        // Room OK — navigate to call page (will join there)
         sessionStorage.setItem('roomCode', code);
         sessionStorage.setItem('role', 'joiner');
-        sessionStorage.setItem('myStreamName', res.myStreamName);
         window.location.href = 'call.html';
       });
     }

@@ -39,8 +39,6 @@ let remoteStream      = null;
 // ─── Init ─────────────────────────────────────────────────────────────────────
 (async function init() {
   roomCode = sessionStorage.getItem('roomCode');
-  const role        = sessionStorage.getItem('role');
-  const savedStream = sessionStorage.getItem('myStreamName');
 
   if (!roomCode) {
     window.location.href = 'index.html';
@@ -56,15 +54,17 @@ let remoteStream      = null;
   updateStatus('connecting', 'Đang khởi tạo...');
   setWaitingDesc('Đang truy cập camera và micro...');
 
-  // 1. Get local media
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  // 1. Get local media — fallback gracefully when camera/mic unavailable
+  localStream = await getLocalMediaWithFallback();
+  if (localStream && localStream.getVideoTracks().length > 0) {
     document.getElementById('local-video').srcObject = localStream;
-  } catch (err) {
-    console.error('[Media] getUserMedia failed:', err);
-    showToast('Không thể truy cập camera/micro: ' + err.message, 'error');
-    updateStatus('disconnected', 'Lỗi thiết bị');
-    return;
+  } else {
+    // No camera — show placeholder in PIP
+    showNoCameraPlaceholder();
+    if (!localStream) {
+      // No audio either — create silent stream so WHIP still works
+      localStream = createSilentStream();
+    }
   }
 
   // 2. Connect to signaling
@@ -73,29 +73,23 @@ let remoteStream      = null;
   socket.on('connect', async () => {
     console.log('[Socket] Connected:', socket.id);
 
-    // If joiner already joined via index.html, skip re-joining
-    if (role === 'joiner' && savedStream) {
-      myStreamName = savedStream;
-      sessionStorage.removeItem('myStreamName');
+    // Both creator and joiner call join-room here (new socket each page load)
+    socket.emit('join-room', { roomCode }, async (res) => {
+      if (!res.success) {
+        showToast(res.error || 'Không thể vào phòng', 'error');
+        setTimeout(() => window.location.href = 'index.html', 2000);
+        return;
+      }
+
+      myStreamName = res.myStreamName;
+      console.log('[Signaling] Joined room, my stream:', myStreamName);
+
       setWaitingDesc('Đang kết nối với SRS...');
       await startPublishing();
-      updateStatus('connecting', 'Chờ người kia vào phòng...');
-      setWaitingDesc('Chia sẻ mã phòng <strong>' + roomCode + '</strong> cho người kia');
-    } else {
-      // Creator: join room fresh
-      socket.emit('join-room', { roomCode }, async (res) => {
-        if (!res.success) {
-          showToast(res.error || 'Không thể vào phòng', 'error');
-          setTimeout(() => window.location.href = 'index.html', 2000);
-          return;
-        }
-        myStreamName = res.myStreamName;
-        setWaitingDesc('Đang kết nối với SRS...');
-        await startPublishing();
-        updateStatus('connecting', 'Chờ người kia vào phòng...');
-        setWaitingDesc('Chia sẻ mã phòng <strong>' + roomCode + '</strong> cho người kia');
-      });
-    }
+
+      updateStatus('connecting', 'Đang chờ người kia...');
+      setWaitingDesc('Chia sẻ mã phòng <strong>' + roomCode + '</strong> hoặc chờ peer kết nối');
+    });
   });
 
   // When peer joins, subscribe to their stream
@@ -130,6 +124,15 @@ let remoteStream      = null;
 
 // ─── WHIP: Publish local stream to SRS ───────────────────────────────────────
 async function startPublishing() {
+  const tracks = localStream ? localStream.getTracks() : [];
+
+  // If no tracks at all (viewer-only mode), skip publishing
+  if (tracks.length === 0) {
+    console.log('[WHIP] No local tracks — skipping publish (viewer-only mode)');
+    if (socket) socket.emit('media-ready');
+    return;
+  }
+
   console.log('[WHIP] Publishing stream:', myStreamName);
 
   publishPc = new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' });
@@ -171,8 +174,11 @@ async function startPublishing() {
   await publishPc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
   console.log('[WHIP] Publishing started ✓');
 
-  // Notify signaling that media is ready
-  if (socket) socket.emit('media-ready');
+  // Notify signaling that media is ready — include track info for peer to use
+  const hasAudio = (localStream?.getAudioTracks().length ?? 0) > 0;
+  const hasVideo = (localStream?.getVideoTracks().length ?? 0) > 0;
+  if (socket) socket.emit('media-ready', { hasAudio, hasVideo });
+  console.log('[WHIP] Media ready, hasAudio:', hasAudio, 'hasVideo:', hasVideo);
 }
 
 // ─── WHEP: Subscribe to peer's stream from SRS (with retry) ──────────────────
@@ -203,23 +209,57 @@ async function doWhep(peerStreamName) {
     subscribePc = null;
   }
 
+  // Get peer's track info from signaling server (reliable, set by peer on publish)
+  const tracks = await getPeerTracksFromSignaling(peerStreamName);
+  console.log('[WHEP] Peer tracks:', tracks);
+
   subscribePc = new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' });
 
-  // Add receive-only transceivers
-  subscribePc.addTransceiver('audio', { direction: 'recvonly' });
-  subscribePc.addTransceiver('video', { direction: 'recvonly' });
+  // Add only transceivers for tracks the peer actually published
+  // Matching the exact set avoids m-line count mismatch with SRS answer
+  if (tracks.hasAudio) subscribePc.addTransceiver('audio', { direction: 'recvonly' });
+  if (tracks.hasVideo) subscribePc.addTransceiver('video', { direction: 'recvonly' });
+  // Ultimate fallback: no info → add both
+  if (!tracks.hasAudio && !tracks.hasVideo) {
+    subscribePc.addTransceiver('audio', { direction: 'recvonly' });
+    subscribePc.addTransceiver('video', { direction: 'recvonly' });
+  }
 
   // Handle incoming tracks
   remoteStream = new MediaStream();
   const remoteVideo = document.getElementById('remote-video');
+  let peerConnectedFired = false;
 
   subscribePc.ontrack = (event) => {
-    console.log('[WHEP] Received track:', event.track.kind);
-    remoteStream.addTrack(event.track);
-    remoteVideo.srcObject = remoteStream;
+    console.log('[WHEP] Received track:', event.track.kind, 'muted:', event.track.muted);
 
-    // When we get the first track, start connected state
-    if (remoteStream.getTracks().length >= 1) {
+    // Prefer event.streams[0] if available, otherwise build manually
+    if (event.streams && event.streams[0]) {
+      remoteVideo.srcObject = event.streams[0];
+    } else {
+      remoteStream.addTrack(event.track);
+      remoteVideo.srcObject = remoteStream;
+    }
+
+    // Ensure volume is up (not muted) and explicitly trigger playback
+    remoteVideo.volume = 1;
+    remoteVideo.muted  = false;
+    remoteVideo.play().then(() => {
+      console.log('[WHEP] Remote playback started ✓');
+    }).catch(err => {
+      console.warn('[WHEP] autoplay blocked:', err.message,
+        '— waiting for user interaction');
+      // Fallback: play on next user interaction
+      const playOnce = () => {
+        remoteVideo.play().catch(() => {});
+        document.removeEventListener('click', playOnce);
+      };
+      document.addEventListener('click', playOnce);
+    });
+
+    // Signal connected only once
+    if (!peerConnectedFired) {
+      peerConnectedFired = true;
       onPeerConnected();
     }
   };
@@ -233,7 +273,6 @@ async function doWhep(peerStreamName) {
 
   const offer = await subscribePc.createOffer();
   await subscribePc.setLocalDescription(offer);
-
   await waitForIceGathering(subscribePc);
 
   const url = `${SRS_API}/rtc/v1/whep/?app=live&stream=${peerStreamName}`;
@@ -246,9 +285,80 @@ async function doWhep(peerStreamName) {
   if (response.status === 404) throw new Error('Stream not ready yet (404)');
   if (!response.ok) throw new Error(`WHEP error: ${response.status}`);
 
-  const answerSdp = await response.text();
-  await subscribePc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  const rawAnswer = await response.text();
+
+  // Fix m-line order in SRS answer to match our offer (Chrome strict validation)
+  const fixedAnswer = fixSdpMLineOrder(subscribePc.localDescription.sdp, rawAnswer);
+  console.log('[WHEP] Setting remote description');
+  await subscribePc.setRemoteDescription({ type: 'answer', sdp: fixedAnswer });
 }
+
+/**
+ * Ask the signaling server for the peer's track info (hasAudio/hasVideo).
+ * The peer emits this info via media-ready after successfully publishing to SRS.
+ * Falls back to {hasAudio:true, hasVideo:true} if not available yet.
+ */
+async function getPeerTracksFromSignaling(peerStreamName) {
+  if (!socket || !socket.connected) return { hasAudio: true, hasVideo: true };
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ hasAudio: true, hasVideo: true }), 2000);
+    socket.emit('get-peer-tracks', { streamName: peerStreamName }, (res) => {
+      clearTimeout(timer);
+      if (res && (res.hasAudio || res.hasVideo)) {
+        resolve({ hasAudio: !!res.hasAudio, hasVideo: !!res.hasVideo });
+      } else {
+        // Peer info not ready yet or unknown — fallback to both
+        resolve({ hasAudio: true, hasVideo: true });
+      }
+    });
+  });
+}
+
+/**
+ * Reorder SDP answer m-lines to match the offer m-line order.
+ * Fixes "The order of m-lines in answer doesn't match order in offer" in Chrome.
+ */
+function fixSdpMLineOrder(offerSdp, answerSdp) {
+  try {
+    // Split SDP into session header + media sections
+    const splitSections = (sdp) => {
+      const parts = sdp.split(/^(?=m=)/m);
+      return { header: parts[0], sections: parts.slice(1) };
+    };
+
+    const offer  = splitSections(offerSdp);
+    const answer = splitSections(answerSdp);
+
+    if (offer.sections.length !== answer.sections.length) {
+      console.warn('[SDP] m-line count mismatch, returning answer as-is');
+      return answerSdp;
+    }
+
+    // Build map: media-type → answer section (handles duplicates by index)
+    const offerTypes  = offer.sections.map(s => s.match(/^m=(\S+)/)?.[1]);
+    const answerByIdx = answer.sections; // same count, reorder by index
+
+    // Build answer map keyed by offer index → find matching answer section
+    // SRS may return answer sections in different order
+    const answerMap = {};
+    answer.sections.forEach(s => {
+      const type = s.match(/^m=(\S+)/)?.[1];
+      if (!answerMap[type]) answerMap[type] = [];
+      answerMap[type].push(s);
+    });
+
+    const reordered = offerTypes.map(type => {
+      const list = answerMap[type];
+      return list && list.length ? list.shift() : answerByIdx.shift();
+    });
+
+    return answer.header + reordered.join('');
+  } catch (e) {
+    console.warn('[SDP] fixSdpMLineOrder failed:', e.message);
+    return answerSdp;
+  }
+}
+
 
 // ─── Connected state ──────────────────────────────────────────────────────────
 function onPeerConnected() {
@@ -388,6 +498,71 @@ function showToast(msg, type = 'info') {
   t.textContent = msg;
   t.className   = `toast ${type} show`;
   toastTimer = setTimeout(() => { t.className = 'toast'; }, 3000);
+}
+
+// ─── Media Helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Try to get media with graceful fallback:
+ *  1. video + audio
+ *  2. audio only (no camera)
+ *  3. null (no devices at all — will use silent stream)
+ */
+async function getLocalMediaWithFallback() {
+  // Try video + audio
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    showToast('Camera và micro đã sẵn sàng', 'success');
+    return stream;
+  } catch (e) {
+    console.warn('[Media] video+audio failed:', e.name, e.message);
+  }
+
+  // Try audio only
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    showToast('Không có camera — chỉ dùng micro', 'info');
+    return stream;
+  } catch (e) {
+    console.warn('[Media] audio-only failed:', e.name, e.message);
+  }
+
+  // No devices
+  showToast('Không tìm thấy camera/micro — chỉ xem', 'info');
+  updateStatus('connecting', 'Chế độ xem (không có thiết bị)');
+  return null;
+}
+
+/** Show a "no camera" placeholder in the local PIP box */
+function showNoCameraPlaceholder() {
+  document.getElementById('local-video').style.display = 'none';
+  document.getElementById('local-video-off').style.display = 'flex';
+  // Change the camera button to disabled state
+  const camBtn = document.getElementById('btn-camera');
+  if (camBtn) {
+    camBtn.disabled = true;
+    camBtn.title = 'Không có camera';
+    camBtn.style.opacity = '0.4';
+  }
+}
+
+/** Create a silent MediaStream (black video + silent audio) as fallback */
+function createSilentStream() {
+  try {
+    const ctx = new AudioContext();
+    const dest = ctx.createMediaStreamDestination();
+    // Oscillator at 0 volume = silent
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start();
+    return dest.stream;
+  } catch (e) {
+    console.warn('[Media] createSilentStream failed:', e);
+    return new MediaStream(); // empty stream
+  }
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
