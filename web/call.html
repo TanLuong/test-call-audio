@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sharegram Call — Đang gọi</title>
+  <meta name="description" content="Cuộc gọi video/audio 1-1 qua SRS WebRTC" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Extra call-page overrides */
+    body { overflow: hidden; }
+    #local-video { transform: scaleX(-1); }
+    .video-off-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    .video-off-icon {
+      width: 48px; height: 48px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .peer-name {
+      position: absolute;
+      bottom: 8px;
+      left: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.8);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+  </style>
+</head>
+<body class="call-page">
+
+  <!-- ── Remote video (full screen) ── -->
+  <video id="remote-video" autoplay playsinline></video>
+  <span class="peer-name" id="peer-name-label"></span>
+
+  <!-- ── Waiting overlay ── -->
+  <div class="waiting-overlay" id="waiting-overlay">
+    <div class="pulse-ring">
+      <div class="pulse-icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+      </div>
+    </div>
+    <div class="waiting-text">
+      <h2>Đang chờ kết nối...</h2>
+      <p id="waiting-desc">Đang chuẩn bị camera và micro</p>
+    </div>
+    <div class="waiting-room-code" id="waiting-room-badge" style="display:none">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+      </svg>
+      Phòng: <strong id="waiting-room-code-val"></strong>
+    </div>
+  </div>
+
+  <!-- ── Local video (PIP) ── -->
+  <div class="local-video-wrapper" id="local-pip">
+    <video id="local-video" autoplay playsinline muted></video>
+    <div class="video-off-placeholder" id="local-video-off" style="display:none">
+      <div class="video-off-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M1 1l22 22M17 11v-3a4 4 0 00-5.66-3.66M9 9v5a4 4 0 005.12 3.83M15 15l-7.83-7.83A4 4 0 007 11v5"/><path d="M19 16.35V11a7 7 0 00-1.13-3.78"/>
+        </svg>
+      </div>
+      <span>Camera tắt</span>
+    </div>
+    <span class="local-label">Bạn</span>
+  </div>
+
+  <!-- ── Top bar ── -->
+  <header class="call-topbar">
+    <div class="call-app-brand">
+      <div class="logo-mini">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+      </div>
+      <span>SharegramCall</span>
+    </div>
+
+    <div class="call-status-badges">
+      <div class="status-badge connecting" id="status-badge">
+        <div class="status-dot"></div>
+        <span id="status-text">Đang kết nối</span>
+      </div>
+      <div class="room-badge" id="room-badge" style="display:none">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        <strong id="topbar-room-code"></strong>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Control bar ── -->
+  <div class="control-bar">
+    <!-- Mic -->
+    <div class="ctrl-btn-wrapper">
+      <button class="ctrl-btn" id="btn-mic" onclick="toggleMic()" aria-label="Tắt/bật micro" title="Micro">
+        <svg id="icon-mic-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <svg id="icon-mic-off" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none">
+          <line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+      <span class="ctrl-btn-label" id="mic-label">Micro</span>
+    </div>
+
+    <!-- Camera -->
+    <div class="ctrl-btn-wrapper">
+      <button class="ctrl-btn" id="btn-camera" onclick="toggleCamera()" aria-label="Tắt/bật camera" title="Camera">
+        <svg id="icon-cam-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+        <svg id="icon-cam-off" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none">
+          <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      </button>
+      <span class="ctrl-btn-label" id="cam-label">Camera</span>
+    </div>
+
+    <!-- End call -->
+    <div class="ctrl-btn-wrapper">
+      <button class="ctrl-btn ctrl-btn-end" onclick="endCall()" aria-label="Kết thúc cuộc gọi" title="Kết thúc">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+          <path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 013.43 9.37 19.79 19.79 0 01.36 .73 2 2 0 012.34-.5h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.32 7.27a16 16 0 004.36 6.04z" transform="rotate(135 12 12)"/>
+        </svg>
+      </button>
+      <span class="ctrl-btn-label">Kết thúc</span>
+    </div>
+
+    <!-- Speaker -->
+    <div class="ctrl-btn-wrapper">
+      <button class="ctrl-btn" id="btn-speaker" onclick="toggleSpeaker()" aria-label="Tắt/bật loa" title="Loa">
+        <svg id="icon-spk-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+        <svg id="icon-spk-off" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+        </svg>
+      </button>
+      <span class="ctrl-btn-label" id="spk-label">Loa</span>
+    </div>
+
+    <!-- Call timer -->
+    <div class="call-timer" id="call-timer" style="display:none">00:00</div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

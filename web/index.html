@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sharegram Call — Cuộc gọi Video & Audio 1-1</title>
+  <meta name="description" content="Tạo hoặc tham gia phòng gọi video/audio riêng tư, bảo mật, thời gian thực." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="lobby-page">
+  <!-- Animated BG -->
+  <div class="bg-animation">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <main class="lobby-container">
+    <!-- Logo -->
+    <div class="app-logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="24" cy="24" r="24" fill="url(#g1)"/>
+          <rect x="10" y="16" width="18" height="14" rx="3" fill="white" opacity="0.9"/>
+          <path d="M28 20l10-5v18l-10-5V20z" fill="white" opacity="0.75"/>
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="48" y2="48">
+              <stop offset="0%" stop-color="#7c3aed"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <h1>Sharegram<span>Call</span></h1>
+        <p>Private · Secure · Real-time</p>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="lobby-card glass-card">
+      <!-- Tabs -->
+      <div class="tabs" role="tablist" aria-label="Loại phòng">
+        <button class="tab active" id="tab-create" role="tab" aria-selected="true"
+          onclick="switchTab('create')" aria-controls="panel-create">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Tạo phòng
+        </button>
+        <button class="tab" id="tab-join" role="tab" aria-selected="false"
+          onclick="switchTab('join')" aria-controls="panel-join">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M14 12H3"/>
+          </svg>
+          Tham gia
+        </button>
+      </div>
+
+      <!-- Panel: Tạo phòng -->
+      <div class="tab-panel active" id="panel-create" role="tabpanel">
+        <p class="panel-title">Tạo phòng mới</p>
+        <p class="panel-desc">Tạo một phòng riêng tư và chia sẻ mã phòng cho người bạn muốn gọi.</p>
+
+        <!-- Room code display (after creation) -->
+        <div class="room-code-display" id="room-code-display">
+          <span class="room-code-label">Mã phòng của bạn</span>
+          <div class="room-code-value">
+            <span id="room-code-text">------</span>
+            <button class="copy-btn" id="copy-btn" onclick="copyRoomCode()" aria-label="Sao chép mã phòng">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+              <span id="copy-label">Sao chép</span>
+            </button>
+          </div>
+          <div class="room-hint">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink:0;margin-top:1px">
+              <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+            </svg>
+            Chia sẻ mã phòng cho người kia, sau đó nhấn "Vào phòng" để bắt đầu cuộc gọi.
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="btn-create" onclick="createRoom()">
+          <div class="spinner"></div>
+          <span class="btn-text">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            Tạo phòng mới
+          </span>
+        </button>
+
+        <div id="enter-room-section" style="display:none; margin-top: 12px;">
+          <button class="btn btn-secondary" onclick="enterRoom()" id="btn-enter">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+            </svg>
+            Vào phòng & bắt đầu gọi
+          </button>
+        </div>
+      </div>
+
+      <!-- Panel: Tham gia -->
+      <div class="tab-panel" id="panel-join" role="tabpanel">
+        <p class="panel-title">Tham gia phòng</p>
+        <p class="panel-desc">Nhập mã phòng mà người kia đã chia sẻ với bạn để tham gia cuộc gọi.</p>
+
+        <div class="form-group">
+          <label class="form-label" for="join-code-input">Mã phòng</label>
+          <input
+            class="form-input"
+            type="text"
+            id="join-code-input"
+            maxlength="6"
+            placeholder="Nhập mã 6 ký tự"
+            autocomplete="off"
+            spellcheck="false"
+            onkeyup="this.value = this.value.toUpperCase(); clearJoinError()"
+            onkeydown="if(event.key==='Enter') joinRoom()"
+          />
+          <div class="error-msg" id="join-error" aria-live="polite"></div>
+        </div>
+
+        <button class="btn btn-primary" id="btn-join" onclick="joinRoom()">
+          <div class="spinner"></div>
+          <span class="btn-text">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M14 12H3"/>
+            </svg>
+            Tham gia ngay
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <p style="font-size:0.72rem; color: var(--text-muted); text-align:center; line-height:1.6; animation: fadeSlideUp 0.6s ease 0.3s both; opacity:0;">
+      Powered by <strong style="color:var(--purple-400)">SRS</strong> WebRTC · 
+      Mã hoá end-to-end · Không lưu trữ dữ liệu
+    </p>
+  </main>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // ── Socket.IO ─────────────────────────────────────────
+    const socket = io({ transports: ['websocket', 'polling'] });
+    let createdRoomCode = null;
+
+    socket.on('connect', () => console.log('[Socket] Connected:', socket.id));
+    socket.on('disconnect', () => console.log('[Socket] Disconnected'));
+
+    // ── Tab switching ─────────────────────────────────────
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+      document.getElementById(`tab-${tab}`).classList.add('active');
+      document.getElementById(`tab-${tab}`).setAttribute('aria-selected', 'true');
+      document.getElementById(`panel-${tab}`).classList.add('active');
+    }
+
+    // ── Create room ───────────────────────────────────────
+    function createRoom() {
+      const btn = document.getElementById('btn-create');
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      socket.emit('create-room', (res) => {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+
+        if (!res.success) {
+          showToast('Không thể tạo phòng, thử lại sau', 'error');
+          return;
+        }
+
+        createdRoomCode = res.roomCode;
+        document.getElementById('room-code-text').textContent = res.roomCode;
+        document.getElementById('room-code-display').classList.add('visible');
+        document.getElementById('enter-room-section').style.display = 'block';
+        btn.textContent = '✓ Đã tạo phòng';
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+      });
+    }
+
+    // ── Enter room (creator) ──────────────────────────────
+    function enterRoom() {
+      if (!createdRoomCode) return;
+      sessionStorage.setItem('roomCode', createdRoomCode);
+      sessionStorage.setItem('role', 'creator');
+      window.location.href = 'call.html';
+    }
+
+    // ── Join room (joiner) ────────────────────────────────
+    function joinRoom() {
+      const input = document.getElementById('join-code-input');
+      const code  = input.value.trim().toUpperCase();
+
+      if (code.length < 6) {
+        showJoinError('Mã phòng phải đủ 6 ký tự');
+        return;
+      }
+
+      const btn = document.getElementById('btn-join');
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      // Verify room exists via signaling
+      socket.emit('join-room', { roomCode: code }, (res) => {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+
+        if (!res.success) {
+          showJoinError(res.error || 'Không tìm thấy phòng');
+          return;
+        }
+
+        // Room verified — go to call page
+        sessionStorage.setItem('roomCode', code);
+        sessionStorage.setItem('role', 'joiner');
+        sessionStorage.setItem('myStreamName', res.myStreamName);
+        window.location.href = 'call.html';
+      });
+    }
+
+    function clearJoinError() {
+      document.getElementById('join-error').textContent = '';
+    }
+    function showJoinError(msg) {
+      document.getElementById('join-error').innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+        </svg> ${msg}`;
+    }
+
+    // ── Copy room code ────────────────────────────────────
+    function copyRoomCode() {
+      if (!createdRoomCode) return;
+      navigator.clipboard.writeText(createdRoomCode).then(() => {
+        const btn  = document.getElementById('copy-btn');
+        const lbl  = document.getElementById('copy-label');
+        btn.classList.add('copied');
+        lbl.textContent = 'Đã sao chép!';
+        setTimeout(() => { btn.classList.remove('copied'); lbl.textContent = 'Sao chép'; }, 2000);
+      });
+    }
+
+    // ── Toast ─────────────────────────────────────────────
+    function showToast(msg, type = 'info') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `toast ${type} show`;
+      setTimeout(() => { t.className = 'toast'; }, 3000);
+    }
+  </script>
+</body>
+</html>

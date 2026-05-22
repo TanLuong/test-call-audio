@@ -1,0 +1,8 @@
+# Bỏ qua file env thật (chỉ commit .env.example)
+.env
+
+# Node modules
+signaling/node_modules/
+
+# Logs
+*.log
